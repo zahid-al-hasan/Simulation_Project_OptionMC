@@ -19,7 +19,7 @@ class StandardNormalSampler(Sampler):
 
     def __init__(self, n_paths, seed=None):
         super().__init__(n_paths, seed)
-        self.rng = np.random.default_rng(self.seed)
+        self.rng = np.random.default_rng(seed=self.seed)
 
     def sample(self):
         # TODO: return standard normal array of shape (n_paths,)

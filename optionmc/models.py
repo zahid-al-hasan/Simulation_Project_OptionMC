@@ -22,16 +22,16 @@ class GeometricBrownianMotion:
         self.sigma = sigma
         self.T = T
 
-    def get_stock_price(self, t, z):
+    def get_stock_price(self, t, z: np.ndarray):
         return (self.S0 * np.exp((self.r - self.sigma**2/2) * self.t + np.sqrt(t) * z))
         pass
 
-    def simulate(self, Z, n_paths, sampler: Sampler):
+    def simulate(self, sampler: Sampler):
         """Generate terminal prices from standard normal draws Z.
 
         Parameters
         ----------
-        Z : np.ndarray of shape (n_paths,) – standard normal random draws
+        Z : np.ndarray of shape (n_paths,) – sampled random draws
         n_paths : int – number of simulation paths
 
         Returns
@@ -39,13 +39,9 @@ class GeometricBrownianMotion:
         np.ndarray of terminal stock prices
         """
 
-        S_t = []
-        for path in n_paths:
-            z = np.random.default_rng().standard_normal()
-            s_t = self.get_stock_price(self.T, z)
-            S_t.append(s_t)
-
-        return np.array(S_t)
+        Z = sampler.sample()
+        S_T = self.S0 * np.exp((self.r - self.sigma**2/2) * self.T + np.sqrt(self.T) * Z)
+        return S_T
         pass
 
 
