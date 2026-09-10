@@ -2,6 +2,7 @@
 
 import numpy as np
 from scipy.stats import norm
+from optionmc.samplers import *
 
 
 class GeometricBrownianMotion:
@@ -25,7 +26,7 @@ class GeometricBrownianMotion:
         return (self.S0 * np.exp((self.r - self.sigma**2/2) * self.t + np.sqrt(t) * z))
         pass
 
-    def simulate(self, Z, n_paths):
+    def simulate(self, Z, n_paths, sampler: Sampler):
         """Generate terminal prices from standard normal draws Z.
 
         Parameters
@@ -38,12 +39,13 @@ class GeometricBrownianMotion:
         np.ndarray of terminal stock prices
         """
 
-        # S_t = []
-        # for draw in n_paths:
-        #     s_t = self.get_stock_price(self.T, draw)
-        #     S_t.append(s_t)
+        S_t = []
+        for path in n_paths:
+            z = np.random.default_rng().standard_normal()
+            s_t = self.get_stock_price(self.T, z)
+            S_t.append(s_t)
 
-        # return np.array(S_t)
+        return np.array(S_t)
         pass
 
 
