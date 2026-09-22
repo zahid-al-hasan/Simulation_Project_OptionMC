@@ -1,107 +1,101 @@
-"""Variance reduction techniques for Monte Carlo option pricing."""
+"""Variance-reduction techniques for Monte Carlo option pricing."""
 
 import numpy as np
 
+from optionmc.samplers import HaltonSampler, SobolSampler
+
 
 class AntitheticVariates:
-    """Antithetic variates: pair each draw with its negation."""
+    """Pair each standard-normal draw with its negation."""
 
     @staticmethod
-    def transform(Z):
-        """Given Z ~ N(0,1) of shape (n/2,), return (Z, -Z) stacked -> (n,).
-
-        Returns
-        -------
-        Z_original, Z_antithetic : tuple of np.ndarray
-        """
-        # TODO: return Z and -Z
-        pass
+    def transform(Z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        draws = np.asarray(Z, dtype=float)
+        if draws.ndim != 1:
+            raise ValueError("Z must be a one-dimensional array")
+        return draws, -draws
 
 
 class ControlVariates:
-    """Control variates: use a known-average quantity to reduce variance.
+    """Use discounted terminal stock value as a known-mean control."""
 
-    For European options, a natural control is the discounted stock price
-    E[S_T * exp(-rT)] = S0 (known analytically).
-    """
+    def __init__(self, S0: float, K: float, r: float, sigma: float, T: float):
+        self.S0 = float(S0)
+        self.K = float(K)
+        self.r = float(r)
+        self.sigma = float(sigma)
+        self.T = float(T)
 
-    def __init__(self, S0, K, r, sigma, T):
-        self.S0 = S0
-        self.K = K
-        self.r = r
-        self.sigma = sigma
-        self.T = T
+    @staticmethod
+    def _paired_arrays(
+        payoffs: np.ndarray, control_values: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        payoff_array = np.asarray(payoffs, dtype=float)
+        control_array = np.asarray(control_values, dtype=float)
+        if payoff_array.ndim != 1 or control_array.ndim != 1:
+            raise ValueError("payoffs and control_values must be one-dimensional")
+        if payoff_array.size != control_array.size or payoff_array.size < 2:
+            raise ValueError("payoffs and control_values must have equal length >= 2")
+        return payoff_array, control_array
 
-    def optimal_coefficient(self, payoffs, control_values):
-        """Compute optimal beta = Cov(payoff, control) / Var(control).
+    def optimal_coefficient(
+        self, payoffs: np.ndarray, control_values: np.ndarray
+    ) -> float:
+        payoff_array, control_array = self._paired_arrays(payoffs, control_values)
+        control_variance = np.var(control_array, ddof=1)
+        if np.isclose(control_variance, 0.0):
+            raise ValueError("control_values must have nonzero sample variance")
+        covariance = np.cov(payoff_array, control_array, ddof=1)[0, 1]
+        return float(covariance / control_variance)
 
-        Parameters
-        ----------
-        payoffs : np.ndarray – option payoff samples
-        control_values : np.ndarray – control variate samples
-
-        Returns
-        -------
-        float – optimal control coefficient beta
-        """
-        # TODO: compute optimal beta
-        pass
-
-    def adjusted_estimates(self, payoffs, control_values, beta):
-        """Return variance-reduced payoff estimates.
-
-        adjusted = payoffs - beta * (control_values - E[control])
-
-        Parameters
-        ----------
-        payoffs : np.ndarray
-        control_values : np.ndarray
-        beta : float
-
-        Returns
-        -------
-        np.ndarray – adjusted payoff samples
-        """
-        # TODO: compute adjusted payoffs
-        pass
+    def adjusted_estimates(
+        self, payoffs: np.ndarray, control_values: np.ndarray, beta: float
+    ) -> np.ndarray:
+        payoff_array, control_array = self._paired_arrays(payoffs, control_values)
+        return payoff_array - float(beta) * (control_array - self.S0)
 
 
 class StratifiedSampling:
-    """Stratified sampling: partition [0,1] into strata, sample within each."""
+    """Sample uniformly within every equal-width stratum of ``[0, 1]``."""
 
-    def __init__(self, n_strata, n_samples_per_stratum):
-        self.n_strata = n_strata
-        self.n_samples_per_stratum = n_samples_per_stratum
+    def __init__(
+        self,
+        n_strata: int,
+        n_samples_per_stratum: int,
+        seed: int | None = None,
+    ):
+        if not isinstance(n_strata, (int, np.integer)) or n_strata <= 0:
+            raise ValueError("n_strata must be a positive integer")
+        if (
+            not isinstance(n_samples_per_stratum, (int, np.integer))
+            or n_samples_per_stratum <= 0
+        ):
+            raise ValueError("n_samples_per_stratum must be a positive integer")
+        self.n_strata = int(n_strata)
+        self.n_samples_per_stratum = int(n_samples_per_stratum)
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
 
-    def stratified_uniform(self):
-        """Generate stratified uniform samples on [0,1].
-
-        Returns
-        -------
-        np.ndarray – stratified samples of shape (n_strata * n_samples_per_stratum,)
-        """
-        # TODO: partition [0,1] into n_strata intervals, draw uniformly within each
-        pass
+    def stratified_uniform(self) -> np.ndarray:
+        offsets = self.rng.random(
+            (self.n_strata, self.n_samples_per_stratum)
+        )
+        strata = np.arange(self.n_strata, dtype=float)[:, None]
+        return ((strata + offsets) / self.n_strata).ravel()
 
 
 class QuasiMonteCarlo:
-    """Quasi-Monte Carlo using low-discrepancy sequences instead of PRNG."""
+    """Generate terminal stock prices with Sobol or Halton draws."""
 
-    def __init__(self, n_paths, method="sobol", seed=None):
+    def __init__(self, n_paths: int, method: str = "sobol", seed: int | None = None):
+        if not isinstance(n_paths, (int, np.integer)) or n_paths <= 0:
+            raise ValueError("n_paths must be a positive integer")
+        if method not in {"sobol", "halton"}:
+            raise ValueError("method must be 'sobol' or 'halton'")
         self.n_paths = n_paths
         self.method = method
         self.seed = seed
 
-    def generate_paths(self, gbm_model):
-        """Generate terminal stock prices using quasi-random sequences.
-
-        Parameters
-        ----------
-        gbm_model : GeometricBrownianMotion
-
-        Returns
-        -------
-        np.ndarray – terminal stock prices
-        """
-        # TODO: use Sobol/Halton to generate Z, then pass to GBM
-        pass
+    def generate_paths(self, gbm_model) -> np.ndarray:
+        sampler_class = SobolSampler if self.method == "sobol" else HaltonSampler
+        return gbm_model.simulate(sampler_class(self.n_paths, seed=self.seed))
