@@ -39,7 +39,7 @@ if ($FullExperiments) {
     & $venvPython scripts\run_repeated_experiments.py --repetitions 30 --output-dir artifacts\data
 
     Write-Host "`nGenerating final tables and figures..."
-    & $venvPython scripts\generate_report_figures.py --data-dir artifacts\data --output-dir artifacts\report
+    & $venvPython scripts\generate_report_figures.py --data-dir artifacts\data --output-dir report_figures
 }
 else {
     Write-Host "`nSkipping the longer repeated experiment."

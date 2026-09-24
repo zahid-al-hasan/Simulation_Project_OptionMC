@@ -9,6 +9,7 @@ from optionmc.experiments import (
     read_csv,
     run_repeated_experiments,
     run_repeated_sensitivity,
+    run_seeded_convergence,
     write_csv,
 )
 
@@ -83,6 +84,29 @@ def test_csv_round_trip(tmp_path):
         {"method": "standard", "price": "10.5"},
         {"method": "sobol", "price": "10.4"},
     ]
+
+
+def test_seeded_convergence_is_simulated_and_reproducible():
+    arguments = dict(
+        parameters=PARAMETERS,
+        path_counts=[100, 200],
+        methods=["standard", "antithetic"],
+        option_type="call",
+        seed=42,
+    )
+    first = run_seeded_convergence(**arguments)
+    second = run_seeded_convergence(**arguments)
+    assert len(first) == 4
+    assert [row["mc_price"] for row in first] == [
+        row["mc_price"] for row in second
+    ]
+    assert all(row["ci_lower"] < row["ci_upper"] for row in first)
+    assert all(row["absolute_error"] >= 0 for row in first)
+    assert all(row["analytical_price"] == pytest.approx(10.4505835722) for row in first)
+    assert any(
+        row["mc_price"] != pytest.approx(row["analytical_price"])
+        for row in first
+    )
 
 
 def test_invalid_experiment_configuration():

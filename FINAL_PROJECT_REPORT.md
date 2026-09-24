@@ -80,7 +80,7 @@ The repository separates the work into testable modules:
 - `scripts/run_repeated_experiments.py`: reproducible experiment command-line interface.
 - `scripts/generate_report_figures.py`: report tables and visualizations.
 
-The automated suite contains 51 tests covering input validation, distributions, formulas, payoff pricing, variance-reduction behavior, QMC reproducibility, analytics, experiment aggregation, CSV output, and plotting.
+The automated suite contains 52 tests covering input validation, distributions, formulas, payoff pricing, variance-reduction behavior, QMC reproducibility, analytics, experiment aggregation, simulation-backed paper-figure data, CSV output, and plotting.
 
 ## 5. Experimental design
 
@@ -111,49 +111,79 @@ Each entry below summarizes 30 independent outer seeds or randomized-scramble se
 | Put | Sobol QMC | 5.573356 | 0.000305 | 7679.25 | 0.010122 | 93.3% | -0.967 |
 | Put | Halton QMC | 5.573655 | 0.000857 | 683.03 | 0.033170 | 86.7% | -0.911 |
 
-The full-precision machine-readable table is in `artifacts/report/final_method_comparison.csv`.
+The full-precision machine-readable table is in `report_figures/final_method_comparison.csv`.
 
-### 6.2 Accuracy and convergence
+### 6.2 Reproduction of all paper figures
+
+No coordinates or prices were copied from the paper to make these graphs. The paper is used only to identify the experiment design. Fixed inputs (`S0`, `K`, `r`, `sigma`, `T`), path-count grids, and random seeds are configuration. Every plotted estimate, error, confidence bound, and histogram is calculated by the implementation; dashed Black-Scholes curves and the GBM density are independently evaluated analytical formulas.
+
+The attached-style convergence graph is reproduced with fresh standard-Monte-Carlo runs. Each point is the simulated discounted-payoff mean, and each shaded bound is `estimate +/- 1.96 * simulated standard error`. The curve need not match the paper point-for-point because an independent random seed produces a different valid sample path.
+
+![Paper Figure 1 reproduction](report_figures/paper_figure1_mc_confidence_convergence.png)
+
+The four sensitivity panels use 30 repeated control-variate simulations at every volatility, maturity, and strike/moneyness value. The near overlap with Black-Scholes is an outcome of the estimator rather than substituted analytical data.
+
+![Paper Figure 2 reproduction](report_figures/paper_figure2_sensitivity_composite.png)
+
+The distribution panels are calculated from 100,000 seeded GBM terminal-price simulations. Only the red density overlay in the lower-right panel is theoretical.
+
+![Paper Figure 3 reproduction](report_figures/paper_figure3_distribution_composite.png)
+
+The standard-versus-antithetic comparison independently simulates both estimators at equal terminal-price budgets and calculates relative error against the analytical price.
+
+![Paper Figure 4 reproduction](report_figures/paper_figure4_standard_vs_antithetic.png)
+
+Exact Figure 1/4 simulation rows, Figure 3 histogram bins, and a complete source map are saved beside the figures in [FIGURE_PROVENANCE.md](report_figures/FIGURE_PROVENANCE.md).
+
+### 6.3 Direct comparison of the four proposed techniques
+
+The proposal's four techniques are antithetic variates, control variates, stratified sampling, and QMC. Sobol represents QMC in this chart because it was the stronger low-discrepancy sequence in the repeated study. The three panels compare call and put RMSE, empirical VRR, and median runtime at the same 100,000-path budget over 30 runs.
+
+![Four-technique comparison](report_figures/four_technique_comparison.png)
+
+This view makes the trade-off explicit: Sobol QMC has the lowest RMSE and greatest variance reduction in this one-dimensional problem; antithetic sampling is fastest but its put VRR is below one; control variates and stratification provide substantial conventional Monte Carlo improvements at moderate additional runtime.
+
+### 6.4 Accuracy and convergence
 
 Standard MC slopes (`-0.471` for calls and `-0.491` for puts) agree with the theoretical `-0.5` rate. The control-variate and stratified estimators preserve approximately the same asymptotic rate but lower the error constant. In contrast, the observed Sobol and Halton slopes are close to `-1` in this one-dimensional problem, giving a much faster empirical decrease in RMSE over the tested range.
 
-![Call RMSE convergence](artifacts/report/call_rmse_convergence.png)
+![Call RMSE convergence](report_figures/call_rmse_convergence.png)
 
-![Put RMSE convergence](artifacts/report/put_rmse_convergence.png)
+![Put RMSE convergence](report_figures/put_rmse_convergence.png)
 
 At 100,000 paths, Sobol QMC reduced call RMSE by roughly 66 times and put RMSE by roughly 73 times relative to standard MC. Halton was also highly accurate but slower than Sobol in this implementation. Control variates and stratification provided substantial improvements with conventional random sampling.
 
-![Accuracy and runtime](artifacts/report/accuracy_runtime_tradeoff.png)
+![Accuracy and runtime](report_figures/accuracy_runtime_tradeoff.png)
 
-### 6.3 Variance reduction is payoff-dependent
+### 6.5 Variance reduction is payoff-dependent
 
 For the call, stratification and the control variate achieved empirical VRRs of `15.17` and `13.63`. For the put, their VRRs were `11.82` and `2.82`. Antithetic sampling achieved a modest call VRR of `1.47`, but its put VRR was `0.83`; a ratio below one means its estimates varied more than standard MC across these repetitions. Antithetic pairing is therefore not automatically beneficial for every payoff under a fixed budget.
 
-![Call variance reduction](artifacts/report/call_variance_reduction.png)
+![Call variance reduction](report_figures/call_variance_reduction.png)
 
-![Put variance reduction](artifacts/report/put_variance_reduction.png)
+![Put variance reduction](report_figures/put_variance_reduction.png)
 
 The very large QMC VRRs reflect this smooth, one-dimensional integration problem. They should not be treated as universal multipliers for high-dimensional or path-dependent derivatives.
 
-### 6.4 Confidence intervals
+### 6.6 Confidence intervals
 
 Control-variate and stratified intervals covered the analytical value in 96.7% of the 30 repetitions for both option types. Other methods ranged from 83.3% to 100%. With only 30 repetitions, each run changes observed coverage by 3.3 percentage points, so these values are diagnostics rather than precise calibration estimates. QMC intervals in particular are based on eight randomized replicate means per outer run.
 
-![Confidence-interval coverage](artifacts/report/confidence_interval_coverage.png)
+![Confidence-interval coverage](report_figures/confidence_interval_coverage.png)
 
-### 6.5 Sensitivity and distribution validation
+### 6.7 Additional sensitivity and distribution validation
 
 Repeated control-variate simulations follow the Black-Scholes curves over the tested volatility, maturity, and strike ranges for both calls and puts. Call values increase with volatility and generally with maturity; put behavior follows the corresponding discounted payoff economics. Varying strike also demonstrates the expected call/put changes across moneyness from `K/S0=0.70` to `1.30`.
 
-![Volatility sensitivity](artifacts/report/volatility_sensitivity.png)
+![Volatility sensitivity](report_figures/volatility_sensitivity.png)
 
-![Maturity sensitivity](artifacts/report/maturity_sensitivity.png)
+![Maturity sensitivity](report_figures/maturity_sensitivity.png)
 
-![Moneyness sensitivity](artifacts/report/moneyness_sensitivity.png)
+![Moneyness sensitivity](report_figures/moneyness_sensitivity.png)
 
 The simulated terminal-price and log-return distributions also match the GBM lognormal and normal theoretical shapes.
 
-![Distribution validation](artifacts/report/distribution_validation.png)
+![Distribution validation](report_figures/distribution_validation.png)
 
 ## 7. Discussion
 

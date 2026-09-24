@@ -96,7 +96,8 @@ The proposal defines this pipeline:
 | Comparison visualizations | Implemented | [`visualization.py`](optionmc/visualization.py) contains seven tested plotting functions. |
 | End-to-end comparison | Implemented | [`run_comparison.py`](scripts/run_comparison.py) generates summary metrics and three comparison plots. |
 | Repeated experimental evaluation | Implemented | [`experiments.py`](optionmc/experiments.py) runs and aggregates independent seeds/scrambles; [`run_repeated_experiments.py`](scripts/run_repeated_experiments.py) persists raw data and metadata. |
-| Automated tests | Implemented | 51 tests cover samplers, formulas, pricing methods, analytics, repeated experiments, validation, and plots. |
+| Paper-figure reproduction | Implemented | All four paper figures are regenerated from fresh simulations or appropriate analytical reference formulas, with auditable CSV data and provenance. |
+| Automated tests | Implemented | 52 tests cover samplers, formulas, pricing methods, analytics, repeated experiments, simulation-backed figure data, validation, and plots. |
 
 ## Numerical implementation
 
@@ -169,7 +170,7 @@ Running the scripts creates these ignored artifacts:
 
 The comparison script prints the final prices, standard errors, variance-reduction ratios, and efficiency ratios. The sensitivity script compares Monte Carlo values directly with Black-Scholes values across volatility, maturity, and strike ranges.
 
-The repeated workflow additionally creates raw and aggregate CSV files, environment metadata, call/put convergence and variance-reduction figures, accuracy-runtime and confidence-coverage figures, repeated sensitivity figures, distribution validation, and final comparison tables under `artifacts/data/` and `artifacts/report/`.
+The repeated workflow additionally creates raw and aggregate CSV files and environment metadata under `artifacts/data/`. It generates tracked report outputs under `report_figures/`, including all four paper-figure counterparts, a direct four-technique chart, convergence and variance-reduction figures, accuracy-runtime and coverage figures, sensitivity and distribution figures, exact plotted data, and final tables.
 
 ## Test and environment verification
 
@@ -184,7 +185,7 @@ Verified command:
 Verified result:
 
 ```text
-51 passed
+52 passed
 ```
 
 The quick and repeated experiment scripts completed successfully. The final report figures were inspected for readable labels, legends, scales, and data alignment.

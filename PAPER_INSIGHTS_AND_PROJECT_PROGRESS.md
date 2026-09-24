@@ -1,6 +1,6 @@
 # Base-paper insights and OptionMC project progress
 
-This note extracts the material in `Sandy.pdf` that matters to the four-slide `B1_G10_OptionMC_Proposal (1).pptx`, then checks the proposed work against the current code. It is a project-focused summary, not a transcription of the paper. Status checked on 22 September 2026 against the working tree; the 51 automated tests passed.
+This note extracts the material in `Sandy.pdf` that matters to the four-slide `B1_G10_OptionMC_Proposal (1).pptx`, then checks the proposed work against the current code. It is a project-focused summary, not a transcription of the paper. Status checked on 24 September 2026 against the working tree; the 52 automated tests passed.
 
 ## Sources and an important title correction
 
@@ -54,7 +54,7 @@ The proposal's expected pipeline is **simulate, estimate, validate, compare**. I
 | 7. Add quasi-MC | Price using Sobol and Halton sequences | Both samplers and `quasi_mc()` are present; QMC error uses independent scrambles | Implemented |
 | 8. Test convergence and sensitivity | Sweep path counts and market/option parameters; compare to Black–Scholes | [`analytics.py`](optionmc/analytics.py) provides convergence, relative error, moneyness, and parameter sensitivity; the scripts run these analyses | Implemented, with scope notes below |
 | 9. Compare methods and present results | Plot price/error convergence and report variance, runtime, and efficiency | The quick scripts remain available; [`run_repeated_experiments.py`](scripts/run_repeated_experiments.py) and [`generate_report_figures.py`](scripts/generate_report_figures.py) now produce the repeated call/put evidence, CSV data, metadata, tables, and final figures | Implemented with 30-run evidence |
-| 10. Validate the software | Run automated correctness and behavior checks | 51 tests cover formulas, distributions, pricing, analytics, repeated experiments, CSV output, and plotting (`python -m pytest -q -p no:cacheprovider`) | Implemented; 51 passed on 22 September 2026 |
+| 10. Validate the software | Run automated correctness and behavior checks | 52 tests cover formulas, distributions, pricing, analytics, repeated experiments, simulation-backed paper-figure data, CSV output, and plotting (`python -m pytest -q -p no:cacheprovider`) | Implemented; 52 passed on 24 September 2026 |
 
 ## Experimental-rigor work completed for the final project report
 
@@ -75,7 +75,7 @@ These are reporting/experimental gaps, not a request to expand into American opt
 1. The paper's baseline parameters and equal terminal-price budgets were fixed in the experiment CLI.
 2. Every method was run for calls and puts over seven path counts and 30 independent outer seeds/scramble sets.
 3. Bias, RMSE, empirical variance, confidence-interval coverage, runtime, VRR, efficiency, and convergence slopes were aggregated.
-4. Report-ready convergence, variance-reduction, accuracy-time, coverage, sensitivity, and distribution figures were generated.
+4. Report-ready convergence, variance-reduction, accuracy-time, coverage, sensitivity, and distribution figures were generated. All four paper figures now have simulation/formula-driven counterparts, and the four proposed techniques are compared together in one chart.
 5. [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md) now distinguishes the base paper from our measured findings and states all retained model limitations.
 
 ## Source-reading cautions

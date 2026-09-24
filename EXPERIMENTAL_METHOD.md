@@ -94,10 +94,14 @@ Seeds 11000 through 11029 are reused across grid values. This provides common ra
 After the CSV files exist, generate figures and the final comparison table:
 
 ```powershell
-python scripts\generate_report_figures.py --data-dir artifacts\data --output-dir artifacts\report
+python scripts\generate_report_figures.py --data-dir artifacts\data --output-dir report_figures
+python -m pip install -e ".[report]"
+python scripts\build_report_pdf.py
 ```
 
-This produces price and RMSE convergence, variance reduction, accuracy-versus-runtime, confidence-interval coverage, distribution validation, and call/put sensitivity figures. It also writes `final_method_comparison.csv` and `final_method_comparison.md`.
+This produces price and RMSE convergence, variance reduction, accuracy-versus-runtime, confidence-interval coverage, distribution validation, and call/put sensitivity figures. It also generates simulation-backed counterparts of paper Figures 1-4, a combined four-technique comparison, the exact plotted CSV data, `FIGURE_PROVENANCE.md`, and the final method-comparison tables.
+
+The paper-reproduction figures do not reuse coordinates or reported values from the paper. Figure 1 and Figure 4 run fresh seeded simulations through `OptionPricing`; Figure 2 uses repeated sensitivity simulations plus independently calculated Black-Scholes curves; Figure 3 simulates 100,000 terminal prices and overlays the mathematical GBM lognormal density. Fixed model parameters, path-count grids, and seeds are experiment configuration rather than fitted output.
 
 ## 8. Interpretation rules
 

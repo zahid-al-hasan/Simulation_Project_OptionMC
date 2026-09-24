@@ -34,7 +34,7 @@ If PowerShell execution policy prevents activation, invoke the environment's int
 python -m pytest -q
 ```
 
-The verified implementation has 51 passing tests.
+The verified implementation has 52 passing tests.
 
 ## Basic usage
 
@@ -79,7 +79,9 @@ For the defensible final comparison, run 30 independent repetitions for calls an
 
 ```powershell
 python scripts\run_repeated_experiments.py --repetitions 30 --output-dir artifacts\data
-python scripts\generate_report_figures.py --data-dir artifacts\data --output-dir artifacts\report
+python scripts\generate_report_figures.py --data-dir artifacts\data --output-dir report_figures
+python -m pip install -e ".[report]"
+python scripts\build_report_pdf.py
 ```
 
 On Windows, the native all-in-one runner avoids requiring Bash or WSL:
@@ -89,7 +91,7 @@ On Windows, the native all-in-one runner avoids requiring Bash or WSL:
 .\run_all.ps1 -FullExperiments # also rebuild repeated data and report figures
 ```
 
-The full run saves raw per-seed data, aggregate CSV files, package/platform metadata, 13 report figures, and the final method-comparison table. See [EXPERIMENTAL_METHOD.md](EXPERIMENTAL_METHOD.md) for the exact design and interpretation rules.
+The full run saves raw per-seed data, aggregate CSV files, package/platform metadata, and 18 simulation/formula-driven report figures. These include reproductions of all four paper figures and one combined comparison of antithetic, control-variate, stratified, and Sobol QMC results. The generated CSV files and [figure provenance](report_figures/FIGURE_PROVENANCE.md) make every plotted value auditable. See [EXPERIMENTAL_METHOD.md](EXPERIMENTAL_METHOD.md) for the exact design and interpretation rules.
 
 ## Numerical conventions
 

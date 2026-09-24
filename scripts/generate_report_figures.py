@@ -11,8 +11,13 @@ import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import StrMethodFormatter
 
-from optionmc.experiments import SUPPORTED_METHODS
+from optionmc.experiments import (
+    SUPPORTED_METHODS,
+    run_seeded_convergence,
+    write_csv,
+)
 from optionmc.models import GeometricBrownianMotion
 from optionmc.samplers import StandardNormalSampler
 
@@ -26,13 +31,16 @@ METHOD_LABELS = {
     "halton": "Halton QMC",
 }
 
+BASE_PARAMETERS = {"S0": 100, "K": 100, "r": 0.05, "sigma": 0.2, "T": 1.0}
+PAPER_PATH_COUNTS = (100, 200, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Generate report-ready figures from repeated experiment CSVs."
     )
     parser.add_argument("--data-dir", type=Path, default=Path("artifacts/data"))
-    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/report"))
+    parser.add_argument("--output-dir", type=Path, default=Path("report_figures"))
     return parser.parse_args()
 
 
@@ -275,6 +283,260 @@ def plot_distribution_validation(output_dir):
     _save(figure, output_dir / "distribution_validation.png")
 
 
+def generate_paper_convergence_figures(output_dir):
+    """Reproduce the paper's Figures 1 and 4 with fresh model simulations."""
+    rows = run_seeded_convergence(
+        BASE_PARAMETERS,
+        PAPER_PATH_COUNTS,
+        methods=("standard", "antithetic"),
+        option_type="call",
+        seed=42,
+    )
+    write_csv(rows, output_dir / "paper_figures_1_and_4_simulation_data.csv")
+    by_method = {
+        method: sorted(
+            [row for row in rows if row["method"] == method],
+            key=lambda row: row["n_paths"],
+        )
+        for method in ("standard", "antithetic")
+    }
+
+    standard = by_method["standard"]
+    x = np.asarray([row["n_paths"] for row in standard])
+    estimates = np.asarray([row["mc_price"] for row in standard])
+    lower = np.asarray([row["ci_lower"] for row in standard])
+    upper = np.asarray([row["ci_upper"] for row in standard])
+    analytical = standard[0]["analytical_price"]
+
+    figure, axis = plt.subplots(figsize=(10, 6))
+    axis.plot(x, estimates, marker="o", linewidth=2, label="Monte Carlo estimate")
+    axis.fill_between(x, lower, upper, alpha=0.25, label="Per-run 95% confidence interval")
+    axis.axhline(
+        analytical,
+        color="tab:red",
+        linestyle="--",
+        linewidth=2,
+        label=f"Black-Scholes (${analytical:.2f})",
+    )
+    axis.set_xscale("log")
+    axis.set_xlabel("Number of terminal-price simulations")
+    axis.set_ylabel("European call price")
+    axis.yaxis.set_major_formatter(StrMethodFormatter("${x:,.2f}"))
+    axis.set_title("Paper Figure 1 reproduction: simulated Monte Carlo convergence")
+    axis.grid(True, which="both", alpha=0.25)
+    axis.legend()
+    _save(figure, output_dir / "paper_figure1_mc_confidence_convergence.png")
+
+    figure, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+    for method, color in (("standard", "tab:blue"), ("antithetic", "tab:orange")):
+        selected = by_method[method]
+        method_x = [row["n_paths"] for row in selected]
+        label = METHOD_LABELS[method]
+        axes[0].plot(
+            method_x,
+            [row["mc_price"] for row in selected],
+            marker="o",
+            color=color,
+            label=label,
+        )
+        axes[1].loglog(
+            method_x,
+            [100 * row["relative_error"] for row in selected],
+            marker="o",
+            color=color,
+            label=label,
+        )
+    axes[0].axhline(
+        analytical,
+        color="black",
+        linestyle="--",
+        label=f"Black-Scholes (${analytical:.2f})",
+    )
+    axes[0].set_xscale("log")
+    axes[0].set_ylabel("European call price")
+    axes[0].yaxis.set_major_formatter(StrMethodFormatter("${x:,.2f}"))
+    axes[0].set_title("Price convergence")
+    axes[1].set_ylabel("Absolute relative error (%)")
+    axes[1].set_title("Error comparison")
+    for axis in axes:
+        axis.set_xlabel("Number of terminal-price simulations")
+        axis.grid(True, which="both", alpha=0.25)
+        axis.legend()
+    figure.suptitle("Paper Figure 4 reproduction: standard vs antithetic Monte Carlo")
+    _save(figure, output_dir / "paper_figure4_standard_vs_antithetic.png")
+
+
+def plot_paper_sensitivity_composite(rows, output_dir):
+    """Create the paper's four-panel sensitivity layout from repeated simulations."""
+    specs = (
+        ("sigma", "parameter_value", "Volatility", "Volatility (sigma)"),
+        ("T", "parameter_value", "Time to maturity", "Years"),
+        ("K", "parameter_value", "Strike price", "Strike price (K)"),
+        ("K", "moneyness", "Moneyness", "Moneyness (K/S0)"),
+    )
+    figure, axes = plt.subplots(2, 2, figsize=(14, 10))
+    for axis, (parameter, x_field, title, xlabel) in zip(axes.ravel(), specs):
+        for option_type, color in (("call", "tab:blue"), ("put", "tab:orange")):
+            selected = _sensitivity_rows(rows, option_type, parameter)
+            x = [row[x_field] for row in selected]
+            axis.plot(
+                x,
+                [row["mean_price"] for row in selected],
+                marker="o",
+                color=color,
+                label=f"{option_type.title()} simulated mean",
+            )
+            axis.plot(
+                x,
+                [row["analytical_price"] for row in selected],
+                linestyle="--",
+                color=color,
+                label=f"{option_type.title()} Black-Scholes",
+            )
+        if x_field == "moneyness":
+            axis.axvline(1.0, color="gray", linestyle=":", label="At the money")
+        axis.set_title(title)
+        axis.set_xlabel(xlabel)
+        axis.set_ylabel("Option price")
+        axis.grid(True, alpha=0.25)
+        axis.legend(fontsize=8)
+    figure.suptitle(
+        "Paper Figure 2 reproduction: simulated call/put sensitivity across 30 runs"
+    )
+    _save(figure, output_dir / "paper_figure2_sensitivity_composite.png")
+
+
+def plot_paper_distribution_composite(output_dir):
+    """Create the paper's distribution panels from one reproducible GBM simulation."""
+    S0, K, r, sigma, T = 100.0, 100.0, 0.05, 0.2, 1.0
+    terminal = GeometricBrownianMotion(S0, r, sigma, T).simulate(
+        StandardNormalSampler(100_000, seed=42)
+    )
+    calls = np.maximum(terminal - K, 0.0)
+    puts = np.maximum(K - terminal, 0.0)
+    x = np.linspace(max(np.min(terminal), np.finfo(float).eps), np.max(terminal), 500)
+    log_mean = np.log(S0) + (r - 0.5 * sigma**2) * T
+    log_std = sigma * np.sqrt(T)
+    theoretical_density = np.exp(
+        -0.5 * ((np.log(x) - log_mean) / log_std) ** 2
+    ) / (x * log_std * np.sqrt(2 * np.pi))
+
+    histogram_rows = []
+    for series_name, values in (("terminal_stock", terminal), ("call_payoff", calls), ("put_payoff", puts)):
+        counts, edges = np.histogram(values, bins=70)
+        for index, count in enumerate(counts):
+            histogram_rows.append(
+                {
+                    "series": series_name,
+                    "seed": 42,
+                    "simulations": 100_000,
+                    "bin_left": edges[index],
+                    "bin_right": edges[index + 1],
+                    "count": int(count),
+                }
+            )
+    write_csv(histogram_rows, output_dir / "paper_figure3_histogram_data.csv")
+
+    figure, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes[0, 0].hist(terminal, bins=70, color="tab:blue", alpha=0.72)
+    axes[0, 0].axvline(K, color="tab:red", linestyle="--", label=f"Strike K = {K:.0f}")
+    axes[0, 0].set_title("Terminal stock-price distribution")
+    axes[0, 0].set_xlabel("Terminal stock price")
+    axes[0, 0].set_ylabel("Frequency")
+    axes[0, 0].legend()
+
+    axes[0, 1].hist(calls, bins=70, color="tab:green", alpha=0.72)
+    axes[0, 1].set_title("Call-payoff distribution")
+    axes[0, 1].set_xlabel("Call payoff at maturity")
+    axes[0, 1].set_ylabel("Frequency")
+
+    axes[1, 0].hist(puts, bins=70, color="tab:orange", alpha=0.72)
+    axes[1, 0].set_title("Put-payoff distribution")
+    axes[1, 0].set_xlabel("Put payoff at maturity")
+    axes[1, 0].set_ylabel("Frequency")
+
+    axes[1, 1].hist(
+        terminal,
+        bins=70,
+        density=True,
+        color="tab:blue",
+        alpha=0.55,
+        label="Empirical simulation",
+    )
+    axes[1, 1].plot(x, theoretical_density, color="tab:red", linewidth=2, label="Theoretical lognormal")
+    axes[1, 1].set_title("Theoretical vs empirical terminal prices")
+    axes[1, 1].set_xlabel("Terminal stock price")
+    axes[1, 1].set_ylabel("Density")
+    axes[1, 1].legend()
+
+    for axis in axes.ravel():
+        axis.grid(True, alpha=0.2)
+    figure.suptitle("Paper Figure 3 reproduction: 100,000 simulated GBM terminal prices")
+    _save(figure, output_dir / "paper_figure3_distribution_composite.png")
+
+
+def plot_four_technique_comparison(rows, output_dir):
+    """Compare the four proposed variance-reduction techniques in one chart."""
+    techniques = ("antithetic", "control_variate", "stratified", "sobol")
+    labels = ("Antithetic", "Control variate", "Stratified", "QMC (Sobol)")
+    selected = {
+        (option_type, row["method"]): row
+        for option_type in ("call", "put")
+        for row in _largest_budget_rows(rows, option_type)
+        if row["method"] in techniques
+    }
+    comparison_rows = [selected[(option_type, method)] for option_type in ("call", "put") for method in techniques]
+    write_csv(comparison_rows, output_dir / "four_technique_comparison_data.csv")
+
+    x = np.arange(len(techniques))
+    width = 0.36
+    figure, axes = plt.subplots(1, 3, figsize=(16, 5.5))
+    metrics = (
+        ("rmse", "RMSE (lower is better)"),
+        ("empirical_vrr", "Empirical VRR (higher is better)"),
+        ("median_runtime_seconds", "Median runtime, seconds (lower is better)"),
+    )
+    for axis, (metric, ylabel) in zip(axes, metrics):
+        call_values = [selected[("call", method)][metric] for method in techniques]
+        put_values = [selected[("put", method)][metric] for method in techniques]
+        axis.bar(x - width / 2, call_values, width, label="Call")
+        axis.bar(x + width / 2, put_values, width, label="Put")
+        axis.set_yscale("log")
+        axis.set_xticks(x, labels, rotation=25, ha="right")
+        axis.set_ylabel(ylabel)
+        axis.grid(True, axis="y", which="both", alpha=0.25)
+        axis.legend()
+        if metric == "empirical_vrr":
+            axis.axhline(1.0, color="black", linestyle="--", linewidth=1, label="No reduction")
+    largest_budget = int(selected[("call", techniques[0])]["n_paths"])
+    repetitions = int(selected[("call", techniques[0])]["repetitions"])
+    figure.suptitle(
+        f"Four variance-reduction techniques at {largest_budget:,} paths ({repetitions} runs)"
+    )
+    _save(figure, output_dir / "four_technique_comparison.png")
+
+
+def write_figure_provenance(output_dir):
+    lines = [
+        "# Figure data provenance",
+        "",
+        "No plotted estimate is copied from the paper or manually chosen to match it.",
+        "",
+        "| Output | Numerical source |",
+        "| --- | --- |",
+        "| Paper Figure 1 reproduction | Fresh `OptionPricing.standard_mc` runs for seed 42 at each configured path count; per-run confidence intervals come from simulated payoff variance. |",
+        "| Paper Figure 2 reproduction | `sensitivity_summary.csv`, aggregating 30 control-variate simulations at each grid value; dashed curves are independently evaluated Black-Scholes formulas. |",
+        "| Paper Figure 3 reproduction | 100,000 GBM terminal prices generated from seeded standard-normal draws; theoretical overlay is the GBM lognormal density. |",
+        "| Paper Figure 4 reproduction | Fresh standard and antithetic simulations for seed 42 at equal terminal-price budgets; relative errors use the computed Black-Scholes value. |",
+        "| Four-technique comparison | `experiment_summary.csv`, aggregating 30 outer seeds/scramble sets at 100,000 paths. QMC is represented by scrambled Sobol. |",
+        "",
+        "Fixed values such as the parameter set, path-count grid, sample size, and random seed are experimental configuration, not fitted graph values.",
+    ]
+    path = output_dir / "FIGURE_PROVENANCE.md"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Wrote {path}")
+
+
 def write_final_tables(rows, output_dir):
     selected = _largest_budget_rows(rows, "call") + _largest_budget_rows(rows, "put")
     fields = [
@@ -361,6 +623,11 @@ def main():
         x_field="moneyness",
     )
     plot_distribution_validation(args.output_dir)
+    generate_paper_convergence_figures(args.output_dir)
+    plot_paper_sensitivity_composite(sensitivity_rows, args.output_dir)
+    plot_paper_distribution_composite(args.output_dir)
+    plot_four_technique_comparison(experiment_rows, args.output_dir)
+    write_figure_provenance(args.output_dir)
     write_final_tables(experiment_rows, args.output_dir)
 
 

@@ -147,6 +147,59 @@ def run_repeated_experiments(
     return rows
 
 
+def run_seeded_convergence(
+    parameters: Mapping[str, float],
+    path_counts: Iterable[int],
+    methods: Sequence[str] = ("standard",),
+    option_type: str = "call",
+    seed: int = 42,
+) -> list[dict[str, Any]]:
+    """Run a reproducible single-seed convergence study from actual simulations.
+
+    This is the data source for paper-style price/CI and direct method-comparison
+    figures. Only the model inputs, path-count grid, and seed are configuration;
+    every plotted estimate and confidence interval comes from ``OptionPricing``.
+    """
+    required = {"S0", "K", "r", "sigma", "T"}
+    if set(parameters) != required:
+        raise ValueError(f"parameters must contain exactly {sorted(required)}")
+    counts = tuple(int(value) for value in path_counts)
+    method_names = tuple(methods)
+    _validate_grid(counts, 2, method_names, (option_type,))
+
+    analytical = _analytical_price(parameters, option_type)
+    rows: list[dict[str, Any]] = []
+    for method in method_names:
+        for n_paths in counts:
+            result = price_once(
+                OptionPricing(**parameters, n_paths=n_paths, seed=seed),
+                method,
+                option_type,
+            )
+            absolute_error = abs(result["price"] - analytical)
+            rows.append(
+                {
+                    "option_type": option_type,
+                    "method": method,
+                    "n_paths": n_paths,
+                    "seed": seed,
+                    "analytical_price": analytical,
+                    "mc_price": result["price"],
+                    "std_error": result["std_error"],
+                    "ci_lower": result["ci_lower"],
+                    "ci_upper": result["ci_upper"],
+                    "absolute_error": absolute_error,
+                    "relative_error": (
+                        absolute_error / abs(analytical)
+                        if analytical != 0
+                        else math.inf
+                    ),
+                    "runtime_seconds": result["runtime"],
+                }
+            )
+    return rows
+
+
 def _mean(rows: Sequence[Mapping[str, Any]], key: str) -> float:
     return float(np.mean([float(row[key]) for row in rows]))
 
