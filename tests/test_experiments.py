@@ -3,14 +3,13 @@
 import numpy as np
 import pytest
 
+from optionmc.analytics import aggregate_experiments, aggregate_sensitivity
+from scripts.results_io import read_csv, write_csv
+
 from optionmc.experiments import (
-    aggregate_experiments,
-    aggregate_sensitivity,
-    read_csv,
     run_repeated_experiments,
     run_repeated_sensitivity,
     run_seeded_convergence,
-    write_csv,
 )
 
 

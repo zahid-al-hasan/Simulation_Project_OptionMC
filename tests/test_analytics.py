@@ -3,12 +3,11 @@
 import numpy as np
 import pytest
 
+from optionmc.experiments import convergence_analysis, moneyness_analysis, parameter_sensitivity
+
 from optionmc.analytics import (
     compute_relative_error,
-    convergence_analysis,
     efficiency_ratio,
-    moneyness_analysis,
-    parameter_sensitivity,
     variance_reduction_ratio,
 )
 

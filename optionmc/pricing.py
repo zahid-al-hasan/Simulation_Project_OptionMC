@@ -1,10 +1,9 @@
 """Monte Carlo pricing engine for European options."""
 
 from time import perf_counter
-import warnings
 
 import numpy as np
-from scipy.stats import norm
+from scipy.stats import norm, t as student_t
 
 from optionmc.models import GeometricBrownianMotion
 from optionmc.samplers import HaltonSampler, SobolSampler, StandardNormalSampler
@@ -13,6 +12,29 @@ from optionmc.variance_reduction import (
     ControlVariates,
     StratifiedSampling,
 )
+
+
+SUPPORTED_METHODS = (
+    "standard", "antithetic", "control_variate", "stratified",
+    "sobol", "halton", "antithetic_control",
+)
+SUPPORTED_OPTION_TYPES = ("call", "put")
+
+
+def price_once(pricer, method: str, option_type: str = "call") -> dict:
+    """One dispatch point for demos and repeated experiments."""
+    if method in {"sobol", "halton"}:
+        return pricer.quasi_mc(option_type, method=method)
+    methods = {
+        "standard": pricer.standard_mc,
+        "antithetic": pricer.antithetic_mc,
+        "control_variate": pricer.control_variate_mc,
+        "stratified": pricer.stratified_mc,
+        "antithetic_control": pricer.antithetic_control_mc,
+    }
+    if method not in methods:
+        raise ValueError(f"method must be one of {SUPPORTED_METHODS}")
+    return methods[method](option_type)
 
 
 class OptionPricing:
@@ -79,8 +101,6 @@ class OptionPricing:
         extra: dict | None = None,
     ) -> dict:
         values = np.asarray(estimates, dtype=float)
-        if values.ndim != 1 or values.size < 2:
-            raise ValueError("at least two one-dimensional estimates are required")
         price = float(np.mean(values))
         sample_variance = float(np.var(values, ddof=1))
         estimator_variance = sample_variance / values.size
@@ -97,6 +117,8 @@ class OptionPricing:
             "n_paths": self.n_paths if n_paths is None else int(n_paths),
             "effective_samples": int(values.size),
             "method": method,
+            "payoff_evaluations": self.n_paths if n_paths is None else int(n_paths),
+            "pilot_evaluations": 0,
         }
         if extra:
             result.update(extra)
@@ -112,8 +134,8 @@ class OptionPricing:
         )
 
     def antithetic_mc(self, option_type: str = "call") -> dict:
-        if self.n_paths % 2:
-            raise ValueError("antithetic_mc requires an even n_paths")
+        if self.n_paths % 2 or self.n_paths < 4:
+            raise ValueError("antithetic_mc requires an even n_paths of at least four")
         start = perf_counter()
         pairs = self.n_paths // 2
         base_draws = StandardNormalSampler(pairs, seed=self.seed).sample()
@@ -133,29 +155,62 @@ class OptionPricing:
         )
 
     def control_variate_mc(self, option_type: str = "call") -> dict:
+        """Fit beta on an independent pilot included in the total budget."""
+        return self._controlled_mc(option_type, paired=False)
+
+    def antithetic_control_mc(self, option_type: str = "call") -> dict:
+        """Apply a pilot-fitted stock control to independent antithetic pairs."""
+        return self._controlled_mc(option_type, paired=True)
+
+    def _controlled_mc(self, option_type: str, paired: bool) -> dict:
+        unit_cost = 2 if paired else 1
+        if self.n_paths % unit_cost or self.n_paths < 4 * unit_cost:
+            raise ValueError("control pricing needs at least four units (pairs if antithetic)")
         start = perf_counter()
-        terminal = self.model.simulate(
-            StandardNormalSampler(self.n_paths, seed=self.seed)
-        )
-        payoffs = self._discounted_payoffs(terminal, option_type)
-        discounted_stock = np.exp(-self.r * self.T) * terminal
+        units = self.n_paths // unit_cost
+        pilot_units = max(2, units // 10)
+        pilot_seed, production_seed = np.random.SeedSequence(self.seed).spawn(2)
+
+        def observations(count, seed):
+            draws = np.random.default_rng(seed).standard_normal(count)
+            terminal = self.model.get_stock_price(self.T, draws)
+            payoff = self._discounted_payoffs(terminal, option_type)
+            stock = np.exp(-self.r * self.T) * terminal
+            if paired:
+                opposite = self.model.get_stock_price(self.T, -draws)
+                payoff = (payoff + self._discounted_payoffs(opposite, option_type)) / 2
+                stock = (stock + np.exp(-self.r * self.T) * opposite) / 2
+            return payoff, stock
+
+        pilot_payoffs, pilot_stock = observations(pilot_units, pilot_seed)
         control = ControlVariates(self.S0, self.K, self.r, self.sigma, self.T)
-        beta = control.optimal_coefficient(payoffs, discounted_stock)
+        beta = (0.0 if np.var(pilot_stock) == 0 else
+                control.optimal_coefficient(pilot_payoffs, pilot_stock))
+        payoffs, discounted_stock = observations(units - pilot_units, production_seed)
         adjusted = control.adjusted_estimates(payoffs, discounted_stock, beta)
         return self._result(
             adjusted,
             start,
-            "control_variate",
-            extra={"beta": beta},
+            "antithetic_control" if paired else "control_variate",
+            extra={"beta": beta, "pilot_evaluations": pilot_units * unit_cost,
+                   "production_evaluations": (units - pilot_units) * unit_cost},
         )
 
     def stratified_mc(
-        self, option_type: str = "call", n_strata: int = 10
+        self, option_type: str = "call", n_strata: int | None = None
     ) -> dict:
+        if n_strata is None:
+            n_strata = min(16, self.n_paths // 2)
+            while self.n_paths % n_strata:
+                n_strata -= 1
+        if not isinstance(n_strata, (int, np.integer)) or n_strata < 1:
+            raise ValueError("n_strata must be a positive integer")
         if self.n_paths % n_strata:
             raise ValueError("n_paths must be divisible by n_strata")
         start = perf_counter()
         samples_per_stratum = self.n_paths // n_strata
+        if samples_per_stratum < 2:
+            raise ValueError("at least two samples per stratum are needed to estimate uncertainty")
         stratifier = StratifiedSampling(
             n_strata, samples_per_stratum, seed=self.seed
         )
@@ -167,13 +222,10 @@ class OptionPricing:
         by_stratum = payoffs.reshape(n_strata, samples_per_stratum)
         stratum_means = np.mean(by_stratum, axis=1)
         price = float(np.mean(stratum_means))
-        if samples_per_stratum > 1:
-            stratum_variances = np.var(by_stratum, axis=1, ddof=1)
-            estimator_variance = float(
-                np.sum(stratum_variances / samples_per_stratum) / n_strata**2
-            )
-        else:
-            estimator_variance = float(np.var(stratum_means, ddof=1) / n_strata)
+        stratum_variances = np.var(by_stratum, axis=1, ddof=1)
+        estimator_variance = float(
+            np.sum(stratum_variances / samples_per_stratum) / n_strata**2
+        )
         std_error = float(np.sqrt(estimator_variance))
         ci_lower, ci_upper = self.confidence_interval(price, std_error)
         return {
@@ -188,6 +240,8 @@ class OptionPricing:
             "effective_samples": n_strata,
             "method": "stratified",
             "n_strata": n_strata,
+            "payoff_evaluations": self.n_paths,
+            "pilot_evaluations": 0,
         }
 
     def quasi_mc(
@@ -198,14 +252,15 @@ class OptionPricing:
     ) -> dict:
         if method not in {"sobol", "halton"}:
             raise ValueError("method must be 'sobol' or 'halton'")
-        if max_replications < 2:
+        if not isinstance(max_replications, (int, np.integer)) or max_replications < 2:
             raise ValueError("max_replications must be at least 2")
         start = perf_counter()
         replications = min(int(max_replications), self.n_paths)
-        base_count, remainder = divmod(self.n_paths, replications)
-        replication_path_counts = [
-            base_count + (index < remainder) for index in range(replications)
-        ]
+        while replications > 1 and self.n_paths % replications:
+            replications -= 1
+        if replications < 2:
+            raise ValueError("QMC budget must support at least two equal-size replications")
+        replication_path_counts = [self.n_paths // replications] * replications
         sampler_class = SobolSampler if method == "sobol" else HaltonSampler
         replication_estimates = []
         replicate_seeds = (
@@ -219,12 +274,10 @@ class OptionPricing:
         for index, path_count in enumerate(replication_path_counts):
             replicate_seed = replicate_seeds[index]
             sampler = sampler_class(path_count, seed=replicate_seed)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
-                terminal = self.model.simulate(sampler)
+            terminal = self.model.simulate(sampler)
             payoff = self._discounted_payoffs(terminal, option_type)
             replication_estimates.append(float(np.mean(payoff)))
-        return self._result(
+        result = self._result(
             np.asarray(replication_estimates),
             start,
             f"quasi_{method}",
@@ -234,3 +287,9 @@ class OptionPricing:
                 "replication_path_counts": tuple(replication_path_counts),
             },
         )
+        # Replicate means are the independent observations, not individual QMC points.
+        margin = student_t.ppf(0.975, replications - 1) * result["std_error"]
+        result.update(ci_lower=result["price"] - margin,
+                      ci_upper=result["price"] + margin,
+                      runtime=perf_counter() - start)
+        return result

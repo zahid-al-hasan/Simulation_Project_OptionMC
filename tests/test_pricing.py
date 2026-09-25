@@ -69,7 +69,13 @@ class TestVarianceReductionPricing:
 
     @pytest.mark.parametrize("method", ["sobol", "halton"])
     def test_quasi_mc_is_accurate(self, pricer, exact_call, method):
-        result = pricer.quasi_mc(method=method)
+        if method == "sobol":
+            # Direct API calls retain support for non-power-of-two budgets,
+            # but must expose SciPy's warning rather than hiding lost balance.
+            with pytest.warns(UserWarning, match="balance properties"):
+                result = pricer.quasi_mc(method=method)
+        else:
+            result = pricer.quasi_mc(method=method)
         assert abs(result["price"] - exact_call) < 4 * result["std_error"]
         assert result["replications"] >= 2
 

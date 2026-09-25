@@ -1,0 +1,15 @@
+{
+  "parameters": {"S0": 100, "K": 100, "r": 0.05, "sigma": 0.2, "T": 1.0},
+  "path_counts": [256, 1024, 4096, 16384, 65536],
+  "repetitions": 100,
+  "methods": ["standard", "antithetic", "control_variate", "stratified", "sobol", "halton", "antithetic_control"],
+  "option_types": ["call", "put"],
+  "seed_start": 1000,
+  "targets": [0.1, 0.05, 0.01],
+  "scenario_grid": {
+    "moneyness": [0.8, 1.0, 1.2],
+    "sigma": [0.1, 0.2, 0.4],
+    "T": [0.25, 1.0, 2.0],
+    "path_counts": [4096]
+  }
+}

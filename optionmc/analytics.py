@@ -1,93 +1,58 @@
 """Convergence analysis and performance metrics."""
 
-from collections.abc import Iterable
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from typing import Any
+import math
 
 import numpy as np
+from scipy.stats import t as student_t
 
-from optionmc.models import BlackScholesAnalytical
-from optionmc.pricing import OptionPricing
-
-
-METHODS = {"standard", "antithetic", "control_variate", "stratified", "quasi"}
+from optionmc.pricing import SUPPORTED_METHODS, SUPPORTED_OPTION_TYPES
 
 
-def _run_pricing_method(
-    pricer: OptionPricing,
-    method: str,
-    option_type: str,
-    qmc_method: str = "sobol",
-) -> dict:
-    if method not in METHODS:
-        raise ValueError(f"method must be one of {sorted(METHODS)}")
-    if method == "standard":
-        return pricer.standard_mc(option_type)
-    if method == "antithetic":
-        return pricer.antithetic_mc(option_type)
-    if method == "control_variate":
-        return pricer.control_variate_mc(option_type)
-    if method == "stratified":
-        n_strata = min(10, pricer.n_paths)
-        while n_strata > 1 and pricer.n_paths % n_strata:
-            n_strata -= 1
-        return pricer.stratified_mc(option_type, n_strata=n_strata)
-    return pricer.quasi_mc(option_type, method=qmc_method)
+def aggregate_experiments(rows):
+    """Summarize each scenario separately, never pooling different contracts."""
+    if not rows:
+        raise ValueError("rows cannot be empty")
+    scenarios = defaultdict(list)
+    for row in rows:
+        scenarios[row.get("scenario_id", "baseline")].append(row)
+    summary = []
+    for scenario_id, group in scenarios.items():
+        parameters = {key: group[0][key] for key in ("S0", "K", "r", "sigma", "T") if key in group[0]}
+        if any(any(row.get(key) != value for key, value in parameters.items()) for row in group):
+            raise ValueError("a scenario_id must identify one set of option parameters")
+        for row in _aggregate_one_scenario(group):
+            row.update(scenario_id=scenario_id, **parameters)
+            summary.append(row)
+    return summary
 
 
-def _analytical_price(
-    S0: float,
-    K: float,
-    r: float,
-    sigma: float,
-    T: float,
-    option_type: str,
-) -> float:
-    analytical = BlackScholesAnalytical(S0, K, r, sigma, T)
-    if option_type == "call":
-        return float(analytical.call_price())
-    if option_type == "put":
-        return float(analytical.put_price())
-    raise ValueError("option_type must be 'call' or 'put'")
+def time_to_target(summary, targets=(0.1, 0.05, 0.01)):
+    """Use the smallest TESTED budget meeting each repeated-run RMSE target.
 
-
-def convergence_analysis(
-    S0: float,
-    K: float,
-    r: float,
-    sigma: float,
-    T: float,
-    n_paths_list: Iterable[int],
-    method: str = "standard",
-    option_type: str = "call",
-    seed: int | None = 42,
-    qmc_method: str = "sobol",
-) -> dict:
-    """Run one pricing method over increasing path counts."""
-    path_counts = np.asarray(list(n_paths_list), dtype=int)
-    if path_counts.ndim != 1 or path_counts.size == 0 or np.any(path_counts < 2):
-        raise ValueError("n_paths_list must contain integers of at least 2")
-    if method == "antithetic" and np.any(path_counts % 2):
-        raise ValueError("antithetic convergence requires even path counts")
-    analytical_price = _analytical_price(S0, K, r, sigma, T, option_type)
-    runs = []
-    for n_paths in path_counts:
-        pricer = OptionPricing(S0, K, r, sigma, T, int(n_paths), seed=seed)
-        runs.append(_run_pricing_method(pricer, method, option_type, qmc_method))
-    prices = np.asarray([run["price"] for run in runs])
-    return {
-        "n_paths": path_counts,
-        "prices": prices,
-        "std_errors": np.asarray([run["std_error"] for run in runs]),
-        "ci_lowers": np.asarray([run["ci_lower"] for run in runs]),
-        "ci_uppers": np.asarray([run["ci_upper"] for run in runs]),
-        "runtimes": np.asarray([run["runtime"] for run in runs]),
-        "variances": np.asarray([run["variance"] for run in runs]),
-        "relative_errors": np.asarray(
-            [compute_relative_error(price, analytical_price) for price in prices]
-        ),
-        "analytical_price": analytical_price,
-        "method": method,
-        "option_type": option_type,
-    }
+    This is a grid estimate, not a first-passage stopping rule. Runtime is the
+    median cost of one estimator at that budget, not the whole benchmark sweep.
+    Unreached targets have no fabricated runtime or extrapolation.
+    """
+    targets = tuple(float(target) for target in targets)
+    if not targets or any(not np.isfinite(t) or t <= 0 for t in targets):
+        raise ValueError("targets must be finite and positive")
+    groups = defaultdict(list)
+    for row in summary:
+        groups[(row.get("scenario_id", "baseline"), row["option_type"], row["method"])].append(row)
+    results = []
+    for (scenario, option, method), rows in groups.items():
+        rows = sorted(rows, key=lambda row: row["n_paths"])
+        for target in targets:
+            chosen = next((row for row in rows if row["rmse"] <= target), None)
+            result = dict(scenario_id=scenario, option_type=option, method=method,
+                          target_rmse=target, reached=chosen is not None)
+            for key in ("n_paths", "rmse", "median_runtime_seconds", "runtime_q1_seconds", "runtime_q3_seconds"):
+                result[key] = chosen[key] if chosen else None
+            results.append(result)
+    return results
 
 
 def compute_relative_error(mc_price: float, analytical_price: float) -> float:
@@ -126,100 +91,166 @@ def efficiency_ratio(
     return float(standard_cost / reduced_cost)
 
 
-def moneyness_analysis(
-    S0: float,
-    K_range: Iterable[float],
-    r: float,
-    sigma: float,
-    T: float,
-    n_paths: int,
-    method: str = "standard",
-    option_type: str = "call",
-    seed: int | None = 42,
-    qmc_method: str = "sobol",
-) -> dict:
-    """Compare simulated and analytical prices across strikes."""
-    strikes = np.asarray(list(K_range), dtype=float)
-    if strikes.ndim != 1 or strikes.size == 0 or np.any(strikes <= 0):
-        raise ValueError("K_range must contain positive strikes")
-    mc_prices = []
-    analytical_prices = []
-    std_errors = []
-    for strike in strikes:
-        pricer = OptionPricing(S0, strike, r, sigma, T, n_paths, seed=seed)
-        result = _run_pricing_method(pricer, method, option_type, qmc_method)
-        mc_prices.append(result["price"])
-        std_errors.append(result["std_error"])
-        analytical_prices.append(
-            _analytical_price(S0, strike, r, sigma, T, option_type)
-        )
-    mc_array = np.asarray(mc_prices)
-    analytical_array = np.asarray(analytical_prices)
-    return {
-        "strikes": strikes,
-        "moneyness": strikes / S0,
-        "mc_prices": mc_array,
-        "analytical_prices": analytical_array,
-        "std_errors": np.asarray(std_errors),
-        "relative_errors": np.asarray(
-            [
-                compute_relative_error(mc, exact)
-                for mc, exact in zip(mc_array, analytical_array)
-            ]
-        ),
-        "method": method,
-        "option_type": option_type,
-    }
+def _mean(rows: Sequence[Mapping[str, Any]], key: str) -> float:
+    return float(np.mean([float(row[key]) for row in rows]))
 
 
-def parameter_sensitivity(
-    S0: float,
-    K: float,
-    r: float,
-    sigma: float,
-    T: float,
-    param_name: str,
-    param_range: Iterable[float],
-    n_paths: int,
-    method: str = "standard",
-    option_type: str = "call",
-    seed: int | None = 42,
-    qmc_method: str = "sobol",
-) -> dict:
-    """Vary one option parameter while holding the others constant."""
-    if param_name not in {"S0", "K", "r", "sigma", "T"}:
-        raise ValueError("param_name must be one of S0, K, r, sigma, or T")
-    values = np.asarray(list(param_range), dtype=float)
-    if values.ndim != 1 or values.size == 0:
-        raise ValueError("param_range cannot be empty")
-    base = {"S0": S0, "K": K, "r": r, "sigma": sigma, "T": T}
-    mc_prices = []
-    analytical_prices = []
-    std_errors = []
-    for value in values:
-        parameters = base.copy()
-        parameters[param_name] = float(value)
-        pricer = OptionPricing(**parameters, n_paths=n_paths, seed=seed)
-        result = _run_pricing_method(pricer, method, option_type, qmc_method)
-        mc_prices.append(result["price"])
-        std_errors.append(result["std_error"])
-        analytical_prices.append(
-            _analytical_price(**parameters, option_type=option_type)
+def _aggregate_one_scenario(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate independent runs and calculate empirical comparison metrics."""
+    grouped: dict[tuple[str, str, int], list[Mapping[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[(str(row["option_type"]), str(row["method"]), int(row["n_paths"]))].append(row)
+
+    summary: list[dict[str, Any]] = []
+    for (option_type, method, n_paths), group in grouped.items():
+        prices = np.asarray([float(row["mc_price"]) for row in group])
+        runtimes = np.asarray([float(row["runtime_seconds"]) for row in group])
+        analytical = float(group[0]["analytical_price"])
+        empirical_variance = float(np.var(prices, ddof=1))
+        repetitions = len(group)
+        if repetitions < 2:
+            raise ValueError("at least two independent runs per configuration are required")
+        empirical_std = float(np.sqrt(empirical_variance))
+        mean_price = float(np.mean(prices))
+        mean_price_se = empirical_std / np.sqrt(repetitions)
+        summary.append(
+            {
+                "option_type": option_type,
+                "method": method,
+                "n_paths": n_paths,
+                "repetitions": repetitions,
+                "analytical_price": analytical,
+                "mean_price": mean_price,
+                "bias": mean_price - analytical,
+                "mean_absolute_error": _mean(group, "absolute_error"),
+                "mean_relative_error": _mean(group, "relative_error"),
+                "rmse": float(np.sqrt(_mean(group, "squared_error"))),
+                "empirical_variance": empirical_variance,
+                "empirical_std": empirical_std,
+                "price_q025": float(np.quantile(prices, 0.025)),
+                "price_q975": float(np.quantile(prices, 0.975)),
+                "mean_price_ci_lower": mean_price - student_t.ppf(0.975, repetitions - 1) * mean_price_se,
+                "mean_price_ci_upper": mean_price + student_t.ppf(0.975, repetitions - 1) * mean_price_se,
+                "mean_reported_std_error": _mean(group, "reported_std_error"),
+                "mean_estimator_variance": _mean(group, "estimator_variance"),
+                "coverage_rate": _mean(group, "ci_covers_exact"),
+                "median_runtime_seconds": float(np.median(runtimes)),
+                "runtime_q1_seconds": float(np.percentile(runtimes, 25)),
+                "runtime_q3_seconds": float(np.percentile(runtimes, 75)),
+            }
         )
-    mc_array = np.asarray(mc_prices)
-    analytical_array = np.asarray(analytical_prices)
-    return {
-        "param_name": param_name,
-        "param_range": values,
-        "mc_prices": mc_array,
-        "analytical_prices": analytical_array,
-        "std_errors": np.asarray(std_errors),
-        "relative_errors": np.asarray(
-            [
-                compute_relative_error(mc, exact)
-                for mc, exact in zip(mc_array, analytical_array)
-            ]
-        ),
-        "method": method,
-        "option_type": option_type,
+
+    lookup = {
+        (row["option_type"], row["method"], row["n_paths"]): row
+        for row in summary
     }
+    for row in summary:
+        standard = lookup.get((row["option_type"], "standard", row["n_paths"]))
+        if standard is None:
+            row["empirical_vrr"] = math.nan
+            row["empirical_efficiency_ratio"] = math.nan
+            continue
+        denominator = row["empirical_variance"]
+        row["empirical_vrr"] = (
+            standard["empirical_variance"] / denominator
+            if denominator > 0
+            else math.inf
+        )
+        reduced_cost = row["rmse"] ** 2 * row["median_runtime_seconds"]
+        standard_cost = (
+            standard["rmse"] ** 2 * standard["median_runtime_seconds"]
+        )
+        row["empirical_efficiency_ratio"] = (
+            standard_cost / reduced_cost if reduced_cost > 0 else math.inf
+        )
+
+    for option_type in {row["option_type"] for row in summary}:
+        for method in {row["method"] for row in summary}:
+            method_rows = sorted(
+                (
+                    row
+                    for row in summary
+                    if row["option_type"] == option_type and row["method"] == method
+                ),
+                key=lambda row: row["n_paths"],
+            )
+            valid = [row for row in method_rows if row["rmse"] > 0]
+            slope = (
+                float(
+                    np.polyfit(
+                        np.log([row["n_paths"] for row in valid]),
+                        np.log([row["rmse"] for row in valid]),
+                        1,
+                    )[0]
+                )
+                if len(valid) >= 2
+                else math.nan
+            )
+            for row in method_rows:
+                row["rmse_convergence_slope"] = slope
+
+    return sorted(
+        summary,
+        key=lambda row: (
+            SUPPORTED_OPTION_TYPES.index(row["option_type"]),
+            SUPPORTED_METHODS.index(row["method"]),
+            row["n_paths"],
+        ),
+    )
+
+
+def aggregate_sensitivity(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Aggregate repeated sensitivity runs into plot-ready statistics."""
+    if not rows:
+        raise ValueError("rows cannot be empty")
+    grouped: dict[tuple[str, str, str, float], list[Mapping[str, Any]]] = defaultdict(list)
+    for row in rows:
+        key = (
+            str(row["option_type"]),
+            str(row["method"]),
+            str(row["parameter"]),
+            float(row["parameter_value"]),
+        )
+        grouped[key].append(row)
+    summary = []
+    for (option_type, method, parameter, value), group in grouped.items():
+        prices = np.asarray([float(row["mc_price"]) for row in group])
+        empirical_std = float(np.std(prices, ddof=1))
+        mean_price = float(np.mean(prices))
+        repetitions = len(group)
+        if repetitions < 2:
+            raise ValueError("at least two independent runs per configuration are required")
+        margin = student_t.ppf(0.975, repetitions - 1) * empirical_std / np.sqrt(repetitions)
+        summary.append(
+            {
+                "option_type": option_type,
+                "method": method,
+                "parameter": parameter,
+                "parameter_value": value,
+                "moneyness": float(group[0]["moneyness"]),
+                "n_paths": int(group[0]["n_paths"]),
+                "repetitions": repetitions,
+                "analytical_price": float(group[0]["analytical_price"]),
+                "mean_price": mean_price,
+                "empirical_std": empirical_std,
+                "price_q025": float(np.quantile(prices, 0.025)),
+                "price_q975": float(np.quantile(prices, 0.975)),
+                "mean_price_ci_lower": mean_price - margin,
+                "mean_price_ci_upper": mean_price + margin,
+                "mean_absolute_error": _mean(group, "absolute_error"),
+                "coverage_rate": _mean(group, "ci_covers_exact"),
+                "median_runtime_seconds": float(
+                    np.median([float(row["runtime_seconds"]) for row in group])
+                ),
+            }
+        )
+    return sorted(
+        summary,
+        key=lambda row: (
+            row["parameter"],
+            SUPPORTED_OPTION_TYPES.index(row["option_type"]),
+            row["parameter_value"],
+        ),
+    )

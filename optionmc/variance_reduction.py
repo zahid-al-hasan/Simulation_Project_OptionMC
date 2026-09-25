@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from optionmc.samplers import HaltonSampler, SobolSampler
+from optionmc.samplers import HaltonSampler, SobolSampler, StratifiedSampling
 
 
 class AntitheticVariates:
@@ -43,7 +43,7 @@ class ControlVariates:
     ) -> float:
         payoff_array, control_array = self._paired_arrays(payoffs, control_values)
         control_variance = np.var(control_array, ddof=1)
-        if np.isclose(control_variance, 0.0):
+        if control_variance <= 0.0:
             raise ValueError("control_values must have nonzero sample variance")
         covariance = np.cov(payoff_array, control_array, ddof=1)[0, 1]
         return float(covariance / control_variance)
@@ -53,35 +53,6 @@ class ControlVariates:
     ) -> np.ndarray:
         payoff_array, control_array = self._paired_arrays(payoffs, control_values)
         return payoff_array - float(beta) * (control_array - self.S0)
-
-
-class StratifiedSampling:
-    """Sample uniformly within every equal-width stratum of ``[0, 1]``."""
-
-    def __init__(
-        self,
-        n_strata: int,
-        n_samples_per_stratum: int,
-        seed: int | None = None,
-    ):
-        if not isinstance(n_strata, (int, np.integer)) or n_strata <= 0:
-            raise ValueError("n_strata must be a positive integer")
-        if (
-            not isinstance(n_samples_per_stratum, (int, np.integer))
-            or n_samples_per_stratum <= 0
-        ):
-            raise ValueError("n_samples_per_stratum must be a positive integer")
-        self.n_strata = int(n_strata)
-        self.n_samples_per_stratum = int(n_samples_per_stratum)
-        self.seed = seed
-        self.rng = np.random.default_rng(seed)
-
-    def stratified_uniform(self) -> np.ndarray:
-        offsets = self.rng.random(
-            (self.n_strata, self.n_samples_per_stratum)
-        )
-        strata = np.arange(self.n_strata, dtype=float)[:, None]
-        return ((strata + offsets) / self.n_strata).ravel()
 
 
 class QuasiMonteCarlo:

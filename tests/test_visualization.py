@@ -7,7 +7,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from optionmc.visualization import (
+from scripts.plots import (
     plot_convergence,
     plot_efficiency_comparison,
     plot_error_convergence,

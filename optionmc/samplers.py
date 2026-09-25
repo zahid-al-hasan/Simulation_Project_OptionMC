@@ -75,3 +75,32 @@ class HaltonSampler(_QuasiRandomSampler):
 
     def uniform_sample(self) -> np.ndarray:
         return self.halton_engine.random(self.n_paths)
+
+
+class StratifiedSampling:
+    """Sample uniformly within every equal-width stratum of ``[0, 1]``."""
+
+    def __init__(
+        self,
+        n_strata: int,
+        n_samples_per_stratum: int,
+        seed: int | None = None,
+    ):
+        if not isinstance(n_strata, (int, np.integer)) or n_strata <= 0:
+            raise ValueError("n_strata must be a positive integer")
+        if (
+            not isinstance(n_samples_per_stratum, (int, np.integer))
+            or n_samples_per_stratum <= 0
+        ):
+            raise ValueError("n_samples_per_stratum must be a positive integer")
+        self.n_strata = int(n_strata)
+        self.n_samples_per_stratum = int(n_samples_per_stratum)
+        self.seed = seed
+        self.rng = np.random.default_rng(seed)
+
+    def stratified_uniform(self) -> np.ndarray:
+        offsets = self.rng.random(
+            (self.n_strata, self.n_samples_per_stratum)
+        )
+        strata = np.arange(self.n_strata, dtype=float)[:, None]
+        return ((strata + offsets) / self.n_strata).ravel()
