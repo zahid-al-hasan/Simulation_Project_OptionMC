@@ -18,16 +18,7 @@ from optionmc.variance_reduction import (
 class OptionPricing:
     """Price European calls and puts with Monte Carlo methods."""
 
-    def __init__(
-        self,
-        S0: float,
-        K: float,
-        r: float,
-        sigma: float,
-        T: float,
-        n_paths: int,
-        seed: int | None = None,
-    ):
+    def __init__(self, S0: float, K: float, r: float, sigma: float, T: float, n_paths: int, seed: int | None = None):
         if K <= 0:
             raise ValueError("K must be positive")
         if not isinstance(n_paths, (int, np.integer)) or n_paths < 2:
@@ -41,6 +32,7 @@ class OptionPricing:
         self.n_paths = int(n_paths)
         self.seed = seed
 
+
     @staticmethod
     def _validate_option_type(option_type: str) -> str:
         normalized = option_type.lower()
@@ -48,9 +40,8 @@ class OptionPricing:
             raise ValueError("option_type must be 'call' or 'put'")
         return normalized
 
-    def _discounted_payoffs(
-        self, terminal_prices: np.ndarray, option_type: str
-    ) -> np.ndarray:
+
+    def _discounted_payoffs(self, terminal_prices: np.ndarray, option_type: str) -> np.ndarray:
         normalized = self._validate_option_type(option_type)
         prices = np.asarray(terminal_prices, dtype=float)
         if normalized == "call":
@@ -59,9 +50,8 @@ class OptionPricing:
             payoff = np.maximum(self.K - prices, 0.0)
         return np.exp(-self.r * self.T) * payoff
 
-    def confidence_interval(
-        self, mean: float, std_error: float, confidence: float = 0.95
-    ) -> tuple[float, float]:
+
+    def confidence_interval(self, mean: float, std_error: float, confidence: float = 0.95) -> tuple[float, float]:
         if not 0 < confidence < 1:
             raise ValueError("confidence must be between 0 and 1")
         if std_error < 0:
@@ -70,14 +60,8 @@ class OptionPricing:
         margin = critical_value * std_error
         return float(mean - margin), float(mean + margin)
 
-    def _result(
-        self,
-        estimates: np.ndarray,
-        start_time: float,
-        method: str,
-        n_paths: int | None = None,
-        extra: dict | None = None,
-    ) -> dict:
+
+    def _result(self, estimates: np.ndarray, start_time: float, method: str, n_paths: int | None = None, extra: dict | None = None) -> dict:
         values = np.asarray(estimates, dtype=float)
         if values.ndim != 1 or values.size < 2:
             raise ValueError("at least two one-dimensional estimates are required")
@@ -101,15 +85,13 @@ class OptionPricing:
         if extra:
             result.update(extra)
         return result
+    
 
     def standard_mc(self, option_type: str = "call") -> dict:
         start = perf_counter()
-        terminal = self.model.simulate(
-            StandardNormalSampler(self.n_paths, seed=self.seed)
-        )
-        return self._result(
-            self._discounted_payoffs(terminal, option_type), start, "standard"
-        )
+        terminal = self.model.simulate(StandardNormalSampler(self.n_paths, seed=self.seed))
+        return self._result(self._discounted_payoffs(terminal, option_type), start, "standard")
+    
 
     def antithetic_mc(self, option_type: str = "call") -> dict:
         if self.n_paths % 2:
@@ -118,12 +100,8 @@ class OptionPricing:
         pairs = self.n_paths // 2
         base_draws = StandardNormalSampler(pairs, seed=self.seed).sample()
         original, antithetic = AntitheticVariates.transform(base_draws)
-        original_payoffs = self._discounted_payoffs(
-            self.model.get_stock_price(self.T, original), option_type
-        )
-        antithetic_payoffs = self._discounted_payoffs(
-            self.model.get_stock_price(self.T, antithetic), option_type
-        )
+        original_payoffs = self._discounted_payoffs(self.model.get_stock_price(self.T, original), option_type)
+        antithetic_payoffs = self._discounted_payoffs(self.model.get_stock_price(self.T, antithetic), option_type)
         pair_estimates = 0.5 * (original_payoffs + antithetic_payoffs)
         return self._result(
             pair_estimates,
@@ -131,6 +109,7 @@ class OptionPricing:
             "antithetic",
             extra={"pairs": pairs},
         )
+
 
     def control_variate_mc(self, option_type: str = "call") -> dict:
         start = perf_counter()

@@ -11,12 +11,7 @@ from optionmc.pricing import OptionPricing
 METHODS = {"standard", "antithetic", "control_variate", "stratified", "quasi"}
 
 
-def _run_pricing_method(
-    pricer: OptionPricing,
-    method: str,
-    option_type: str,
-    qmc_method: str = "sobol",
-) -> dict:
+def _run_pricing_method(pricer: OptionPricing, method: str, option_type: str, qmc_method: str = "sobol") -> dict:
     if method not in METHODS:
         raise ValueError(f"method must be one of {sorted(METHODS)}")
     if method == "standard":
@@ -33,14 +28,7 @@ def _run_pricing_method(
     return pricer.quasi_mc(option_type, method=qmc_method)
 
 
-def _analytical_price(
-    S0: float,
-    K: float,
-    r: float,
-    sigma: float,
-    T: float,
-    option_type: str,
-) -> float:
+def _analytical_price(S0: float, K: float, r: float, sigma: float, T: float, option_type: str) -> float:
     analytical = BlackScholesAnalytical(S0, K, r, sigma, T)
     if option_type == "call":
         return float(analytical.call_price())
@@ -99,6 +87,7 @@ def compute_relative_error(mc_price: float, analytical_price: float) -> float:
     return numerator / denominator
 
 
+
 def variance_reduction_ratio(var_standard: float, var_reduced: float) -> float:
     """Return standard-estimator variance divided by reduced-estimator variance."""
     if var_standard < 0 or var_reduced < 0:
@@ -108,12 +97,8 @@ def variance_reduction_ratio(var_standard: float, var_reduced: float) -> float:
     return float(var_standard / var_reduced)
 
 
-def efficiency_ratio(
-    error_standard: float,
-    time_standard: float,
-    error_reduced: float,
-    time_reduced: float,
-) -> float:
+
+def efficiency_ratio(error_standard: float, time_standard: float, error_reduced: float, time_reduced: float) -> float:
     """Compare mean-squared-error runtime products; values above one favor reduction."""
     if error_standard < 0 or error_reduced < 0:
         raise ValueError("errors cannot be negative")
@@ -124,6 +109,7 @@ def efficiency_ratio(
     if reduced_cost == 0:
         return float("inf") if standard_cost > 0 else 1.0
     return float(standard_cost / reduced_cost)
+
 
 
 def moneyness_analysis(
@@ -150,9 +136,8 @@ def moneyness_analysis(
         result = _run_pricing_method(pricer, method, option_type, qmc_method)
         mc_prices.append(result["price"])
         std_errors.append(result["std_error"])
-        analytical_prices.append(
-            _analytical_price(S0, strike, r, sigma, T, option_type)
-        )
+        analytical_prices.append(_analytical_price(S0, strike, r, sigma, T, option_type))
+        
     mc_array = np.asarray(mc_prices)
     analytical_array = np.asarray(analytical_prices)
     return {
@@ -162,10 +147,7 @@ def moneyness_analysis(
         "analytical_prices": analytical_array,
         "std_errors": np.asarray(std_errors),
         "relative_errors": np.asarray(
-            [
-                compute_relative_error(mc, exact)
-                for mc, exact in zip(mc_array, analytical_array)
-            ]
+            [compute_relative_error(mc, exact) for mc, exact in zip(mc_array, analytical_array)]
         ),
         "method": method,
         "option_type": option_type,

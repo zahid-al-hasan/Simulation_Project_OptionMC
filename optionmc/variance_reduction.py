@@ -16,6 +16,7 @@ class AntitheticVariates:
         return draws, -draws
 
 
+
 class ControlVariates:
     """Use discounted terminal stock value as a known-mean control."""
 
@@ -26,10 +27,9 @@ class ControlVariates:
         self.sigma = float(sigma)
         self.T = float(T)
 
+
     @staticmethod
-    def _paired_arrays(
-        payoffs: np.ndarray, control_values: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _paired_arrays(payoffs: np.ndarray, control_values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         payoff_array = np.asarray(payoffs, dtype=float)
         control_array = np.asarray(control_values, dtype=float)
         if payoff_array.ndim != 1 or control_array.ndim != 1:
@@ -38,9 +38,8 @@ class ControlVariates:
             raise ValueError("payoffs and control_values must have equal length >= 2")
         return payoff_array, control_array
 
-    def optimal_coefficient(
-        self, payoffs: np.ndarray, control_values: np.ndarray
-    ) -> float:
+
+    def optimal_coefficient(self, payoffs: np.ndarray, control_values: np.ndarray) -> float:
         payoff_array, control_array = self._paired_arrays(payoffs, control_values)
         control_variance = np.var(control_array, ddof=1)
         if np.isclose(control_variance, 0.0):
@@ -48,22 +47,17 @@ class ControlVariates:
         covariance = np.cov(payoff_array, control_array, ddof=1)[0, 1]
         return float(covariance / control_variance)
 
-    def adjusted_estimates(
-        self, payoffs: np.ndarray, control_values: np.ndarray, beta: float
-    ) -> np.ndarray:
+
+    def adjusted_estimates(self, payoffs: np.ndarray, control_values: np.ndarray, beta: float) -> np.ndarray:
         payoff_array, control_array = self._paired_arrays(payoffs, control_values)
         return payoff_array - float(beta) * (control_array - self.S0)
+
 
 
 class StratifiedSampling:
     """Sample uniformly within every equal-width stratum of ``[0, 1]``."""
 
-    def __init__(
-        self,
-        n_strata: int,
-        n_samples_per_stratum: int,
-        seed: int | None = None,
-    ):
+    def __init__(self, n_strata: int, n_samples_per_stratum: int, seed: int | None = None):
         if not isinstance(n_strata, (int, np.integer)) or n_strata <= 0:
             raise ValueError("n_strata must be a positive integer")
         if (
@@ -76,12 +70,12 @@ class StratifiedSampling:
         self.seed = seed
         self.rng = np.random.default_rng(seed)
 
+
     def stratified_uniform(self) -> np.ndarray:
-        offsets = self.rng.random(
-            (self.n_strata, self.n_samples_per_stratum)
-        )
+        offsets = self.rng.random((self.n_strata, self.n_samples_per_stratum))
         strata = np.arange(self.n_strata, dtype=float)[:, None]
         return ((strata + offsets) / self.n_strata).ravel()
+
 
 
 class QuasiMonteCarlo:
@@ -95,6 +89,7 @@ class QuasiMonteCarlo:
         self.n_paths = n_paths
         self.method = method
         self.seed = seed
+
 
     def generate_paths(self, gbm_model) -> np.ndarray:
         sampler_class = SobolSampler if self.method == "sobol" else HaltonSampler
