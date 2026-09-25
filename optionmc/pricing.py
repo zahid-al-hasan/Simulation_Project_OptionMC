@@ -2,7 +2,9 @@
 
 import numpy as np
 import time
-
+from samplers import Sampler, SobolSampler, HaltonSampler, StandardNormalSampler
+from models import GeometricBrownianMotion
+from config import *
 
 class OptionPricing:
     """Core MC pricing engine supporting multiple variance reduction methods."""
@@ -16,7 +18,7 @@ class OptionPricing:
         self.n_paths = n_paths
         self.seed = seed
 
-    def standard_mc(self, option_type="call"):
+    def standard_mc(self, sampler: Sampler, model: GeometricBrownianMotion, option_type="call"):
         """Plain Monte Carlo pricing.
 
         Returns
@@ -24,6 +26,25 @@ class OptionPricing:
         dict with keys: price, std_error, ci_lower, ci_upper, runtime
         """
         # TODO: generate Z, simulate S_T, compute payoffs, discount, return stats
+        start_time = time.time()
+        Z = sampler.sample()
+        S_T = model.simulate(sampler=sampler)
+        end_time = time.time()
+        payoff = max(S_T - self.K, 0)
+        if option_type == "put":
+            payoff = max(self.K - S_T, 0)
+
+        discount = np.exp(-self.r * (self.T))
+        price = discount * np.mean(payoff)
+        std_err = np.std(payoff) / np.sqrt(sampler.n_paths)
+
+        return {
+            "price" : price, 
+            "std_err" : std_err,
+            "ci_lower" : price - Z_REF * std_err,
+            "ci_upper" : price + Z_REF * std_err,
+            "runtime" : end_time - start_time
+        }
         pass
 
     def antithetic_mc(self, option_type="call"):

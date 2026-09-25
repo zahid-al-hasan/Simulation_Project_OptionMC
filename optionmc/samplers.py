@@ -2,10 +2,10 @@
 
 import numpy as np
 from scipy.stats import qmc, norm
-
+from config import SEED, N_PATHS
 
 class Sampler:
-    def __init__(self, n_paths, seed=None):
+    def __init__(self, n_paths=N_PATHS, seed=SEED):
         self.n_paths = n_paths
         self.seed = seed
         pass
@@ -17,7 +17,7 @@ class Sampler:
 class StandardNormalSampler(Sampler):
     """Generate i.i.d. standard normal draws."""
 
-    def __init__(self, n_paths, seed=None):
+    def __init__(self, n_paths=N_PATHS, seed=SEED):
         super().__init__(n_paths, seed)
         self.rng = np.random.default_rng(seed=self.seed)
 
@@ -31,7 +31,7 @@ class StandardNormalSampler(Sampler):
 class SobolSampler(Sampler):
     """Generate quasi-random Sobol sequences mapped to standard normal."""
 
-    def __init__(self, n_paths, seed=None, d=1):
+    def __init__(self, n_paths=N_PATHS, seed=SEED, d=1):
         super().__init__(n_paths, seed)
         self.d = d
         # TODO: set up Sobol engine via scipy.stats.qmc.Sobol
@@ -47,7 +47,7 @@ class SobolSampler(Sampler):
 class HaltonSampler(Sampler):
     """Generate quasi-random Halton sequences mapped to standard normal."""
 
-    def __init__(self, n_paths, seed=None, d=1):
+    def __init__(self, n_paths=N_PATHS, seed=SEED, d=1):
         super().__init__(n_paths, seed)
         self.d = d
         # TODO: set up Halton engine via scipy.stats.qmc.Halton

@@ -2,7 +2,7 @@
 
 import numpy as np
 from scipy.stats import norm
-from optionmc.samplers import *
+from samplers import Sampler, SobolSampler, HaltonSampler, StandardNormalSampler
 
 
 class GeometricBrownianMotion:
@@ -23,7 +23,7 @@ class GeometricBrownianMotion:
         self.T = T
 
     def get_stock_price(self, t, z: np.ndarray):
-        return (self.S0 * np.exp((self.r - self.sigma**2/2) * self.t + np.sqrt(t) * z))
+        return (self.S0 * np.exp((self.r - self.sigma**2/2) * t + self.sigma * np.sqrt(t) * z))
         pass
 
     def simulate(self, sampler: Sampler):
@@ -40,7 +40,7 @@ class GeometricBrownianMotion:
         """
 
         Z = sampler.sample()
-        S_T = self.S0 * np.exp((self.r - self.sigma**2/2) * self.T + np.sqrt(self.T) * Z)
+        S_T = self.S0 * np.exp((self.r - self.sigma**2/2) * self.T + self.sigma * np.sqrt(self.T) * Z)
         return S_T
         pass
 
@@ -59,19 +59,19 @@ class BlackScholesAnalytical:
 
     def _d1(self, t, z):
         stock_price = self.brownian.get_stock_price(t, z)
-        return ((np.log(np.log(stock_price/self.K)) + (self.r + self.sigma**2/2) * (self.T - t)) / (self.sigma * np.sqrt(self.T - t)))
+        return ((np.log(stock_price/self.K) + (self.r + self.sigma**2/2) * (self.T - t)) / (self.sigma * np.sqrt(self.T - t)))
         pass
 
-    def _d2(self, t):
-        return (self._d1 - self.sigma*np.sqrt(self.T - t))
+    def _d2(self, t, z):
+        return (self._d1(t, z) - self.sigma*np.sqrt(self.T - t))
         pass
 
     def call_price(self, t, z):
         stock_price = self.brownian.get_stock_price(t, z)
-        return (stock_price * norm.cdf(self._d1) - self.K * np.exp(-self.r * (self.T - t)) * norm.cdf(self._d2))
+        return (stock_price * norm.cdf(self._d1(t, z)) - self.K * np.exp(-self.r * (self.T - t)) * norm.cdf(self._d2(t, z)))
         pass
 
     def put_price(self, t, z):
         stock_price = self.brownian.get_stock_price(t, z)
-        return (self.K * np.exp(-self.r * (self.T - t)) * norm.cdf(-self._d2) - stock_price * norm.cdf(-self._d1))
+        return (self.K * np.exp(-self.r * (self.T - t)) * norm.cdf(-self._d2(t, z)) - stock_price * norm.cdf(-self._d1(t, z)))
         pass
