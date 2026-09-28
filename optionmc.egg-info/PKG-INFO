@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: optionmc
+Version: 0.1.0
+Summary: Monte Carlo European option pricing with variance reduction techniques
+Requires-Python: >=3.10
+Requires-Dist: numpy>=1.24
+Requires-Dist: scipy>=1.11
+Requires-Dist: matplotlib>=3.7
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4; extra == "dev"
+Provides-Extra: report
+Requires-Dist: Markdown>=3.10; extra == "report"
