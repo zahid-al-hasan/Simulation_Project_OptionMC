@@ -128,9 +128,8 @@ class OptionPricing:
             extra={"beta": beta},
         )
 
-    def stratified_mc(
-        self, option_type: str = "call", n_strata: int = 10
-    ) -> dict:
+
+    def stratified_mc(self, option_type: str = "call", n_strata: int = 10) -> dict:
         if self.n_paths % n_strata:
             raise ValueError("n_paths must be divisible by n_strata")
         start = perf_counter()
@@ -169,12 +168,7 @@ class OptionPricing:
             "n_strata": n_strata,
         }
 
-    def quasi_mc(
-        self,
-        option_type: str = "call",
-        method: str = "sobol",
-        max_replications: int = 8,
-    ) -> dict:
+    def quasi_mc(self, option_type: str = "call", method: str = "sobol", max_replications: int = 8) -> dict:
         if method not in {"sobol", "halton"}:
             raise ValueError("method must be 'sobol' or 'halton'")
         if max_replications < 2:
